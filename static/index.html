@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Search</title>
+  <style>
+    :root {
+      --bg: #f6f6f4; --surface: #fff; --text: #1d1d1f; --muted: #6b6b70;
+      --border: #e2e2e0; --accent: #2f5bea; --accent-text: #fff; --error-bg: #fdecec; --error: #b42318;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141416; --surface: #1e1e21; --text: #ececee; --muted: #9a9aa2;
+        --border: #2e2e33; --accent: #6b8cff; --accent-text: #0b0b0d; --error-bg: #3a1d1d; --error: #ff9b8f;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 860px; margin: 0 auto; padding: 40px 16px 64px; }
+    h1 { font-size: 24px; margin: 0 0 20px; }
+    form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+    .row { display: flex; gap: 8px; }
+    input[type=search] { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    button { padding: 10px 18px; font: inherit; font-weight: 600; border: 0; border-radius: 8px;
+      background: var(--accent); color: var(--accent-text); cursor: pointer; }
+    button:disabled { opacity: .6; cursor: default; }
+    .modes { display: inline-flex; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 3px; align-self: flex-start; }
+    .modes label { position: relative; }
+    .modes input { position: absolute; opacity: 0; }
+    .modes span { display: block; padding: 6px 14px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+    .modes input:checked + span { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+    .modes input:focus-visible + span { outline: 2px solid var(--accent); }
+    .hint { color: var(--muted); font-size: 13px; margin: 0; }
+    .status { color: var(--muted); margin-bottom: 12px; }
+    .error { background: var(--error-bg); color: var(--error); padding: 12px 14px; border-radius: 8px;
+      margin-bottom: 16px; overflow-wrap: anywhere; }
+    .results { display: flex; flex-direction: column; gap: 12px; }
+    .card { display: flex; gap: 14px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px; }
+    .card img, .card .noimg { width: 72px; height: 108px; flex: none; border-radius: 6px;
+      object-fit: cover; background: var(--border); }
+    .card h2 { font-size: 16px; margin: 0 0 2px; }
+    .meta { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+    .overview { margin: 0; font-size: 14px; display: -webkit-box; -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical; overflow: hidden; }
+    .score { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Movie Search</h1>
+  <form id="form">
+    <div class="row">
+      <input id="q" type="search" placeholder="e.g. space adventure with robots" aria-label="Search movies" autofocus>
+      <button id="go" type="submit">Search</button>
+    </div>
+    <div class="modes" role="radiogroup" aria-label="Search type">
+      <label><input type="radio" name="mode" value="keyword"><span>Keyword</span></label>
+      <label><input type="radio" name="mode" value="hybrid" checked><span>Hybrid</span></label>
+      <label><input type="radio" name="mode" value="semantic"><span>Semantic</span></label>
+    </div>
+    <p class="hint" id="hint"></p>
+  </form>
+  <div id="status" class="status"></div>
+  <div id="results" class="results"></div>
+</main>
+<script>
+  const HINTS = {
+    keyword: "Matches the exact words in titles, overviews and genres (BM25).",
+    hybrid: "Combines keyword matching with meaning-based search.",
+    semantic: "Finds movies with similar meaning, even without shared words.",
+  };
+  const $ = (id) => document.getElementById(id);
+  const mode = () => document.querySelector("input[name=mode]:checked").value;
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  function updateHint() { $("hint").textContent = HINTS[mode()]; }
+  document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", () => {
+    updateHint();
+    if ($("q").value.trim()) run();
+  }));
+  updateHint();
+
+  $("form").addEventListener("submit", (e) => { e.preventDefault(); run(); });
+
+  async function run() {
+    const q = $("q").value.trim();
+    if (!q) return;
+    $("go").disabled = true;
+    $("status").textContent = "Searching…";
+    $("results").innerHTML = "";
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&mode=${mode()}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      $("status").textContent = `${data.results.length} result${data.results.length === 1 ? "" : "s"} · ${data.mode}`;
+      $("results").innerHTML = data.results.map(card).join("");
+    } catch (err) {
+      $("status").textContent = "";
+      $("results").innerHTML = `<div class="error">${esc(err.message)}</div>`;
+    } finally {
+      $("go").disabled = false;
+    }
+  }
+
+  function card(m) {
+    const year = m.release_date ? m.release_date.slice(0, 4) : "";
+    const poster = m.poster_path
+      ? `<img src="https://image.tmdb.org/t/p/w154${esc(m.poster_path)}" alt="" loading="lazy">`
+      : `<div class="noimg"></div>`;
+    const rating = m.vote_average != null ? `★ ${Number(m.vote_average).toFixed(1)}` : "";
+    const meta = [year, rating, (m.genres || []).join(", ")].filter(Boolean).map(esc).join(" · ");
+    const score = m.score != null ? Number(m.score).toFixed(3) : "";
+    return `<article class="card">${poster}
+      <div><h2>${esc(m.title)}</h2><div class="meta">${meta}</div><p class="overview">${esc(m.overview)}</p></div>
+      <div class="score" title="Relevance score">${score}</div></article>`;
+  }
+</script>
+</body>
+</html>
