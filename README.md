@@ -62,6 +62,8 @@ The backend uses only the Python standard library plus `weaviate-client`.
 
 Open <http://localhost:8000>, type a query, and pick **Keyword**, **Hybrid** or **Semantic**. Switching modes re-runs the current search so you can compare results.
 
+In **Hybrid** mode an **Alpha** slider sets the balance between keyword (0) and semantic (1) scoring. **Released after** limits results to movies released after the chosen date, in any mode.
+
 ### Command line
 
 ```bash
@@ -74,19 +76,36 @@ The mode is optional and defaults to `hybrid`.
 ### API
 
 ```
-GET /api/search?q=<query>&mode=<keyword|hybrid|semantic>
+GET /api/search?q=<query>&mode=<keyword|hybrid|semantic>&alpha=<0..1>&release_date=<YYYY-MM-DD>
 ```
 
-Returns `{"query", "mode", "results": [...]}`. Each result includes `title`, `overview`, `release_date`, `vote_average`, `genres`, `poster_path`, `tmdb_id` and `score`. Higher scores are better in every mode (semantic distances are converted to similarity).
+`alpha` (default `0.5`) only affects hybrid search. `release_date` is optional and keeps movies released strictly after that date. Invalid values return `400`.
+
+Returns `{"query", "mode", "alpha", "release_date", "results": [...]}`. Each result includes `title`, `overview`, `release_date`, `vote_average`, `genres`, `poster_path`, `tmdb_id` and `score`. Higher scores are better in every mode (semantic distances are converted to similarity).
+
+## Running against a local Weaviate
+
+Set `WEAVIATE_LOCAL=1` to connect to `localhost:8080` (gRPC `50051`) instead of Weaviate Cloud. Only `COHERE_APIKEY` is needed. Locally the collection uses the `hnsw` index and queries get a 10-minute timeout so they survive debugger breakpoints.
+
+```bash
+docker compose up -d                                   # Weaviate 1.39 in Docker
+WEAVIATE_LOCAL=1 .venv/bin/python create_collection.py
+WEAVIATE_LOCAL=1 .venv/bin/python import_data.py
+WEAVIATE_LOCAL=1 .venv/bin/python server.py
+```
+
+To debug Weaviate itself, stop the container (`docker compose stop`) and run `./run_weaviate_debug.sh`. It builds Weaviate from a source checkout (`$WEAVIATE_SRC`, default `~/workspace/weaviate`) and runs it under a headless Delve debugger. Attach with `dlv connect 127.0.0.1:2345`, and leave with `quit -c` so Weaviate keeps running. Data is stored in `.weaviate-debug-data/`.
 
 ## Project layout
 
 | File | Purpose |
 |---|---|
-| `client.py` | `get_client()` – connects to Weaviate Cloud using the env vars above |
+| `client.py` | `get_client()` – connects to Weaviate Cloud, or a local instance when `WEAVIATE_LOCAL=1` |
+| `docker-compose.yml` | Single-node local Weaviate |
+| `run_weaviate_debug.sh` | Runs Weaviate from source under Delve |
 | `create_collection.py` | Creates the `Movies` collection (Cohere vectorizer + generative config) if it doesn't exist |
 | `import_data.py` | Downloads the dataset and batch-imports it |
-| `search.py` | `search(client, query, mode)` and a small CLI |
+| `search.py` | `search(client, query, mode, alpha=, release_date=)` and a small CLI |
 | `server.py` | Standard-library HTTP server for the UI and `/api/search` |
 | `static/index.html` | The search page |
 | `test.py` | Prints the installed `weaviate-client` version |

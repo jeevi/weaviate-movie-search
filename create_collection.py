@@ -1,3 +1,5 @@
+import os
+
 from weaviate.classes.config import Configure, DataType, Property
 
 from client import get_client
@@ -30,8 +32,11 @@ with get_client() as client:
       vector_config=Configure.Vectors.text2vec_cohere(
         model="embed-v4.0",
         source_properties=["title", "overview", "genres"],
-        # Weaviate Cloud only allows the hfresh index type on this cluster
-        vector_index_config=Configure.VectorIndex.hfresh(),
+        # Weaviate Cloud only allows the hfresh index type on this cluster; use hnsw locally
+        vector_index_config=(
+          Configure.VectorIndex.hnsw() if os.environ.get("WEAVIATE_LOCAL") == "1"
+          else Configure.VectorIndex.hfresh()
+        ),
       ),
       generative_config=Configure.Generative.cohere(model="command-a-03-2025"),
     )
