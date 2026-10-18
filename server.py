@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -30,13 +31,25 @@ class Handler(BaseHTTPRequestHandler):
     if mode not in MODES:
       return self._json(400, {"error": f"Mode must be one of: {', '.join(MODES)}"})
     try:
-      results = search(client, query, mode)
+      alpha = float(params.get("alpha", [0.5])[0])
+    except ValueError:
+      alpha = -1
+    if not 0 <= alpha <= 1:  # also rejects NaN
+      return self._json(400, {"error": "Alpha must be a number between 0 and 1."})
+    release_date = params.get("release_date", [None])[0]
+    if release_date:
+      try:
+        release_date = datetime.strptime(release_date, "%Y-%m-%d").date().isoformat()
+      except ValueError:
+        return self._json(400, {"error": "Release date must be a valid date (YYYY-MM-DD)."})
+    try:
+      results = search(client, query, mode, alpha=alpha, release_date=release_date)
     except Exception as e:  # surface Weaviate errors (e.g. no vectorizer) to the UI
       return self._json(502, {"error": f"{type(e).__name__}: {e}"})
     for r in results:
       if r.get("release_date"):
         r["release_date"] = r["release_date"].date().isoformat()
-    self._json(200, {"query": query, "mode": mode, "results": results})
+    self._json(200, {"query": query, "mode": mode, "alpha": alpha, "release_date": release_date, "results": results})
 
   def _json(self, status, payload):
     self._send(status, json.dumps(payload).encode(), "application/json")

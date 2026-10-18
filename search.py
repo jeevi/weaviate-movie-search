@@ -1,6 +1,7 @@
 import sys
+from datetime import datetime, timezone
 
-from weaviate.classes.query import MetadataQuery
+from weaviate.classes.query import Filter, MetadataQuery
 
 from client import get_client
 
@@ -10,17 +11,21 @@ RETURN_PROPERTIES = [
 MODES = ("keyword", "hybrid", "semantic")
 
 
-def search(client, query_text, mode="hybrid", limit=10):
+def search(client, query_text, mode="hybrid", limit=10, alpha=0.5, release_date=None):
   """Search movies by keyword (BM25), semantic (vector) or hybrid (both)."""
   movies = client.collections.use("Movies")
   common = dict(limit=limit, return_properties=RETURN_PROPERTIES)
 
+  if release_date:
+    filters = Filter.by_property("release_date").greater_than(datetime.strptime(release_date, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+  else:
+    filters = None
   if mode == "keyword":
-    response = movies.query.bm25(query=query_text, return_metadata=MetadataQuery(score=True), **common)
+    response = movies.query.bm25(query=query_text, return_metadata=MetadataQuery(score=True), filters=filters, **common)
   elif mode == "semantic":
-    response = movies.query.near_text(query=query_text, return_metadata=MetadataQuery(distance=True), **common)
+    response = movies.query.near_text(query=query_text, return_metadata=MetadataQuery(distance=True), filters=filters, **common)
   elif mode == "hybrid":
-    response = movies.query.hybrid(query=query_text, return_metadata=MetadataQuery(score=True), **common)
+    response = movies.query.hybrid(query=query_text, return_metadata=MetadataQuery(score=True), alpha=alpha, filters=filters, **common)
   else:
     raise ValueError(f"Unknown mode '{mode}', expected one of {MODES}")
 

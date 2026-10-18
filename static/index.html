@@ -35,6 +35,16 @@
     .modes span { display: block; padding: 6px 14px; border-radius: 6px; cursor: pointer; color: var(--muted); }
     .modes input:checked + span { background: var(--accent); color: var(--accent-text); font-weight: 600; }
     .modes input:focus-visible + span { outline: 2px solid var(--accent); }
+    .alpha { display: flex; align-items: center; gap: 10px; max-width: 420px; font-size: 13px; color: var(--muted); }
+    .alpha[hidden] { display: none; }
+    .alpha input { flex: 1; min-width: 0; accent-color: var(--accent); }
+    .alpha output { min-width: 3ch; font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+    .date { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+    .date input { padding: 6px 10px; font: inherit; color: var(--text); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 8px; color-scheme: light dark; }
+    .date input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .date button { padding: 6px 10px; font-weight: 500; background: none; color: var(--accent); }
+    .date button[hidden] { display: none; }
     .hint { color: var(--muted); font-size: 13px; margin: 0; }
     .status { color: var(--muted); margin-bottom: 12px; }
     .error { background: var(--error-bg); color: var(--error); padding: 12px 14px; border-radius: 8px;
@@ -64,6 +74,18 @@
       <label><input type="radio" name="mode" value="hybrid" checked><span>Hybrid</span></label>
       <label><input type="radio" name="mode" value="semantic"><span>Semantic</span></label>
     </div>
+    <div class="alpha" id="alpha-row">
+      <label for="alpha">Alpha</label>
+      <span>Keyword</span>
+      <input id="alpha" type="range" min="0" max="1" step="0.05" value="0.5">
+      <span>Semantic</span>
+      <output id="alpha-value" for="alpha">0.50</output>
+    </div>
+    <div class="date">
+      <label for="release-date">Released after</label>
+      <input id="release-date" type="date" min="1990-01-01" max="2024-12-31">
+      <button id="clear-date" type="button" hidden>Clear</button>
+    </div>
     <p class="hint" id="hint"></p>
   </form>
   <div id="status" class="status"></div>
@@ -79,12 +101,29 @@
   const mode = () => document.querySelector("input[name=mode]:checked").value;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-  function updateHint() { $("hint").textContent = HINTS[mode()]; }
+  function updateHint() {
+    $("hint").textContent = HINTS[mode()];
+    $("alpha-row").hidden = mode() !== "hybrid";
+  }
   document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", () => {
     updateHint();
     if ($("q").value.trim()) run();
   }));
   updateHint();
+
+  // Update the label while dragging, but only search on release so each drag is one Cohere call.
+  $("alpha").addEventListener("input", () => { $("alpha-value").textContent = Number($("alpha").value).toFixed(2); });
+  $("alpha").addEventListener("change", () => { if ($("q").value.trim()) run(); });
+
+  // A date input only reports a value once the date is complete, so "change" fires on a full date or a clear.
+  $("release-date").addEventListener("change", () => {
+    $("clear-date").hidden = !$("release-date").value;
+    if ($("q").value.trim()) run();
+  });
+  $("clear-date").addEventListener("click", () => {
+    $("release-date").value = "";
+    $("release-date").dispatchEvent(new Event("change"));
+  });
 
   $("form").addEventListener("submit", (e) => { e.preventDefault(); run(); });
 
@@ -95,10 +134,14 @@
     $("status").textContent = "Searching…";
     $("results").innerHTML = "";
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&mode=${mode()}`);
+      const params = new URLSearchParams({ q, mode: mode(), alpha: $("alpha").value });
+      if ($("release-date").value) params.set("release_date", $("release-date").value);
+      const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      $("status").textContent = `${data.results.length} result${data.results.length === 1 ? "" : "s"} · ${data.mode}`;
+      const alphaNote = data.mode === "hybrid" ? ` · alpha ${Number(data.alpha).toFixed(2)}` : "";
+      const dateNote = data.release_date ? ` · released after ${data.release_date}` : "";
+      $("status").textContent = `${data.results.length} result${data.results.length === 1 ? "" : "s"} · ${data.mode}${alphaNote}${dateNote}`;
       $("results").innerHTML = data.results.map(card).join("");
     } catch (err) {
       $("status").textContent = "";
